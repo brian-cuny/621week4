@@ -34,7 +34,7 @@ ggplot(lin.training, aes(PARENT1.CAT, log(TARGET_AMT))) +
 
 #MODEL 1, everything log target
 
-ln.model.1.full <- lm(log(TARGET_AMT) ~ ., data=lin.training)
+ln.model.1 <- lm(log(TARGET_AMT) ~ ., data=lin.training)
 
 summary(ln.model.1.full)
 
@@ -63,11 +63,11 @@ plot(ln.model.2)
 
 car::avPlots(ln.model.2)
 
-ln.model.3 <- MASS::rlm(TARGET_AMT ~ ., data=lin.training)
+temp <- lin.training %>% 
+  filter(!row_number() %in% c(761, 1110, 1409))
+ln.model.3 <- MASS::rlm(log(TARGET_AMT) ~ poly(BLUEBOOK, 2), data=temp)
 summary(ln.model.3)
+plot(ln.model.3)
 
-
-
-
-
-
+car::avPlots(ln.model.3)
+termplot(ln.model.3, partial.resid=TRUE, smooth=panel.smooth, term=1)

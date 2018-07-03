@@ -83,6 +83,15 @@ log.training <- insurance.complete[, -2] %>%
   filter(row_number() %in% part)
 log.testing <- insurance.complete[, -2] %>%
   filter(!row_number() %in% part)
+
+set.seed(1)
+lm.insurance.complete <- insurance.complete %>%
+  filter(TARGET_AMT != 0)
+part <- caret::createDataPartition(lm.insurance.complete$TARGET_AMT, p=0.8, list=FALSE)
+lin.training <- lm.insurance.complete[, -1] %>%
+  filter(row_number() %in% part)
+lin.testing <- lm.insurance.complete[, -1] %>%
+  filter(!row_number() %in% part)
 ```
 
 With all the values imputed, I am ready to start my initial exploration of the predictors. I created two functions to help with this analysis.
@@ -141,6 +150,15 @@ Predictor.Disp <- function(x){
   
   grid.arrange(plot.1, plot.2, ncol=2)
 }
+
+Predictor.Linear <- function(x){
+  ggplot(lin.training, aes_string(x=x)) +
+    geom_point(aes(y=log(TARGET_AMT))) +
+    geom_smooth(aes(y=log(TARGET_AMT)), method='lm') +
+    theme_bw() +
+    labs(x = 'Predictor',
+         y = 'Log Response')
+}
 ```
 
 ##KIDSDRIV
@@ -153,6 +171,7 @@ that having any number of kid driver's results in a higher likelyhood of making 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Discrete.Disp('KIDSDRIV')
 table(KIDSDRIV = log.training$KIDSDRIV, TARGET=log.training$TARGET_FLAG)
+Predictor.Linear('KIDSDRIV')
 ```
 
 ##AGE
@@ -163,6 +182,7 @@ Age has a nice, normal distribution centered around 45. The distribution based o
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('AGE')
+Predictor.Linear('AGE')
 ```
 
 ##YOJ
@@ -173,6 +193,7 @@ This predictor is nearly normal other than people who are currently unemployed. 
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('YOJ')
+Predictor.Linear('YOJ')
 ```
 
 ##INCOME
@@ -181,8 +202,11 @@ Predictor.Disp('YOJ')
 
 Income is, just like in the general population, heavily skewed. This is represented in the boxplot as well as there are numerous upper outliers in both cases. The correlation between YOJ and INCOME is not as large as one might imagine.
 
+There are outliers on INCOME that may need to be addressed when refering to the TARGET_AMT.
+
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('INCOME')
+Predictor.Linear('INCOME')
 ```
 
 ##HOME_VAL
@@ -193,6 +217,7 @@ Usefullness of this predictor may be dented by the large number of people who do
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('HOME_VAL')
+Predictor.Linear('HOME_VAL')
 ```
 
 ##TRAVTIME
@@ -203,6 +228,7 @@ The distance travelled to work is fairly normal and the boxplots show only a sub
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('TRAVTIME')
+Predictor.Linear('TRAVTIME')
 ```
 
 ##BLUEBOOK
@@ -211,8 +237,11 @@ Predictor.Disp('TRAVTIME')
 
 The boxplot indicates that those making a claim have a car that is lower in value. Could this be that more expensive cars are driven more carefully due to their cost or is this a confounding variable that once again measures INCOME?
 
+BLUEBOOK is the only variable that appears to show any ability to capture the value of the response variable TARGET_AMT.
+
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('BLUEBOOK')
+Predictor.Linear('BLUEBOOK')
 ```
 
 ##TIF
@@ -223,6 +252,7 @@ The density plot of this predictor indicates that it could be considered as disc
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('TIF')
+Predictor.Linear('TIF')
 ```
 
 ##OLDCLAIM
@@ -233,6 +263,7 @@ Heavily, heavily skewed predictor. Most people do not make claims.
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('OLDCLAIM')
+Predictor.Linear('OLDCLAIM')
 ```
 
 ##CLM_FREQ
@@ -476,8 +507,97 @@ caret::confusionMatrix(table(predicted=predictions, actual = log.testing$TARGET_
 
 Based on all the available diagnostics, I will select **model 2**. It has consistently produces the highest quality predictions.
 
-##LINEAR REGRESSION
+#LINEAR REGRESSION
 
+## Model 4
+
+The initial exploratio does not bode well for the linear regression. None of the predictors appeared to show any real ability to predictor the response variable. I will begin by include all the predictors compared against the log transformed TARGET_AMT.
+
+```{r, cache=TRUE}
+ln.model.1 <- lm(log(TARGET_AMT) ~ ., data=lin.training)
+summary(ln.model.1)
+```
+
+The summary shows that only BLUEBOOK appears to have any predictive ability. This was the initial conclusion of the exploratory analysis as well. [SEE APPENDIX]
+
+## Model 5
+
+This model was selected by using model shrinkage. [SEE APPENDIX]
+
+```{r, cache=TRUE}
+ln.model.2 <- lm(log(TARGET_AMT) ~ BLUEBOOK + CLM_FREQ + MVR_PTS + MSTATUS.CAT + RED_CAR.CAT, data=lin.training)
+summary(ln.model.2)
+
+```
+
+Despite including only the most important predictors, 3 of them are still not statistically significant. The below anova test demonstrates that there was no apparent loss of predicive ability by dropping the other terms.
+
+```{r}
+anova(ln.model.1, ln.model.2)
+```
+
+##Model 6
+
+I noticed during the exploratory analysis that there were a number of upper and lower outliers that may be skewing the results of the regression. I will perform a robusted regression for this model and further explore BLUEBOOK, the most significant of the predictors in more depth. [SEE APPENDIX]
+
+```{r, cache=TRUE}
+ln.model.3 <- MASS::rlm(log(TARGET_AMT) ~ poly(BLUEBOOK, 2), data=lin.training)
+summary(ln.model.3)
+```
+
+```{r}
+anova(ln.model.2, ln.model.3)
+```
+
+There does not appear to be any significant difference in the predictive ability of all three models. 
+
+##MODEL SELECTION
+
+All three models have performed approximately the same and thus the decision on the final model is somewhat arbitrary. I will make my decision based on the results of the testing.
+
+```{r}
+pred.1 <- exp(predict(ln.model.1, newdata=lin.testing, interval='confidence'))
+sum(ifelse(pred.1[, 2] < lin.testing[, 1] & pred.1[, 3] > lin.testing[, 1], 1, 0))
+
+pred.2 <- exp(predict(ln.model.2, newdata=lin.testing, interval='confidence'))
+sum(ifelse(pred.2[, 2] < lin.testing[, 1] & pred.2[, 3] > lin.testing[, 1], 1, 0))
+
+pred.3 <- exp(predict(ln.model.3, newdata=lin.testing, interval='confidence'))
+sum(ifelse(pred.3[, 2] < lin.testing[, 1] & pred.3[, 3] > lin.testing[, 1], 1, 0))
+```
+
+While none of the models did a particularly strong job of predicting TARGET_AMT, the first model did by far the best. This is the model that included over a dozen useless predictors. This has me concerned about overfitting. This is especially due to the fact that an anova test determined no significant difference in the first and second models. For that reason, I have decied to select **model 5**.
+
+#CONCLUSION
+
+As required, the predictions for the logistic regression and linear regression have been written out to csv files. However, in the end neither model turned out to be particularly powerful. The logistic regression was able to get near an 80% accurate prediction rate, however considering that a 75% prediction rate could be obtained by simply guessing that a claim would NOT be made, 80% is not as strong as it appears. In the same veign, it appears that essentially none of our predictors is usefull for identifying the cost of a claim other than the current value of the car. The $R^2$ on the linear regression was particularly poor at about 0.02. No modeling techniques were able to overcome this barrier.
+
+In a way, this exploration has only reaffirmed the need for insurance. Car collisions are somewhat rare and can happen to anyone at any time. The likely and cost of the incident can vary widely. As a result of not being able to predict accurately when such incidents will occur, we require that all drivers protect themselves with insurance.
+
+```{r cache=TRUE, message=FALSE}
+evaluation.data <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\621week4\\insurance-evaluation-data.csv') %>%
+  select(-INDEX) %>% #don't need index
+  mutate(TARGET_FLAG = factor(TARGET_FLAG),
+         INCOME = as.numeric(str_replace_all(INCOME, '\\D', '')),
+         PARENT1.CAT = factor(ifelse(PARENT1 == 'Yes', 1, 0)),
+         HOME_VAL = as.numeric(str_replace_all(HOME_VAL, '\\D', '')),
+         MSTATUS.CAT = factor(ifelse(MSTATUS == 'Yes', 1, 0)),
+         MALE.CAT = factor(ifelse(SEX == 'M', 1, 0)),
+         EDUCATION.CAT = factor(ifelse(EDUCATION == 'z_High School', 'High School', EDUCATION)),
+         JOB.CAT = factor(ifelse(JOB == 'z_Blue Collar', 'Blue Collar', JOB)),
+         PRIVATE.CAT = factor(ifelse(CAR_USE == 'Private', 1, 0)),
+         BLUEBOOK = as.numeric(str_replace_all(BLUEBOOK, '\\D', '')),
+         CAR_TYPE.CAT = factor(ifelse(CAR_TYPE == 'z_SUV', 'SUV', CAR_TYPE)),
+         RED_CAR.CAT = factor(ifelse(RED_CAR == 'yes', 1, 0)),
+         OLDCLAIM = as.numeric(str_replace_all(OLDCLAIM, '\\D', '')),
+         REVOKED.CAT = factor(ifelse(REVOKED == 'Yes', 1, 0)),
+         URBAN.CAT = factor(ifelse(URBANICITY == 'Highly Urban/ Urban', 1, 0)),
+         MVR_PTS2 = MVR_PTS*MVR_PTS) %>%
+  select(-SEX, -URBANICITY, -CAR_USE, -MSTATUS, -PARENT1, -JOB, -CAR_TYPE, -REVOKED, -RED_CAR, -EDUCATION)
+
+write_csv(as_data_frame(predict(model.2.diag, newdata=evaluation.data, type='response')), 'logistic_regression_output.csv')
+write_csv(as_data_frame(predict(ln.model.2, newdata=evaluation.data, interval='confidence')), 'linear_regression_output.csv')
+```
 
 #APPENDIX
 
@@ -548,13 +668,30 @@ MASS::stepAIC(model.3.full, trace=0)
 MASS::stepAIC(model.3.full, k=log(nrow(log.training)), trace=0)
 ```
 
+##Model 4 Selection
+
+Model 4 shows no apparent outliers or bad leverage points. This is a valid regression.
+
+```{r, message=FALSE, cache=TRUE, fig.height=4, fig.width=4, fig.align='center'}
+par(mfrow=c(2,2))
+plot(ln.model.1)
+```
+
+##Model 5 Selection
+
+Model 5 was simplified using stepAIC
+
+```{r, cache=TRUE}
+MASS::stepAIC(ln.model.1, trace=0)
+```
+
 ##DIAGNOSTICS
 
 ##LOGISTIC REGRESSION
 
 Multi-collinearity is not an issue for any of the three models.
 
-```{r, cahce=TRUE}
+```{r, cache=TRUE}
 car::vif(model.2.diag)
 ```
 
@@ -565,3 +702,21 @@ car::marginalModelPlots(model.2.diag)
 ```
 
 ##LINEAR REGRESSION
+
+Multi-collinearity is not an issue for any of the three models.
+
+```{r, cache=TRUE}
+car::vif(ln.model.2)
+```
+
+A plot of diagnostics and mmps demonstrate that this is a valid regression. There are a number of lower outliers present due to the extremely small size of the claim.
+
+```{r, message=FALSE, warning=FALSE, cache=TRUE, fig.height=4, fig.width=4, fig.align='center'}
+par(mfrow=c(2,2))
+plot(ln.model.2)
+car::mmps(ln.model.2)
+```
+
+
+
+
