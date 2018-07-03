@@ -191,11 +191,11 @@ MASS::stepAIC(model.1.full, k=log(nrow(log.training))) #drops RED_CAR
 
 library(lars)
 model.1.lasso <- lars(model.matrix(~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
-                                     RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
+                                     RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), as.numeric(log.training$TARGET_FLAG))
 plot(model.1.lasso)
 set.seed(123)
 cvlmod <- cv.lars(model.matrix(~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
-                                 RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
+                                 RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), as.numeric(log.training$TARGET_FLAG))
 cvlmod$index[which.min(cvlmod$cv)] #0.9292929
 predict(model.1.lasso, s=0.9292929, type='coef', mode='fraction')$coef
 
@@ -264,7 +264,7 @@ probability <- predict(model.2, type='response')
 
 model.2.check <- model.2.check %>%
   mutate(logit = log(probability/(1-probability))) %>%
-  gather(key='predictors', value='predictor.value', -logit) 
+  gather(key='predictors', value='predictor.value') 
 
 ggplot(model.2.check, aes(logit, predictor.value)) +
   geom_point(size = 0.5, alpha = 0.5) +

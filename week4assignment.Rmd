@@ -1,8 +1,13 @@
 ---
-title: "Untitled"
-author: "group1"
-date: "July 3, 2018"
-output: html_document
+output:
+  pdf_document:
+    df_print: kable
+header-includes:
+  \usepackage{fancyhdr}
+  \pagestyle{fancy}
+  \fancyhead[L]{\textbf{CRIME ANALYSIS AND PREDICTION VIA LOGISTIC REGRESSION}}
+  \fancyhead[R]{\thepage}
+  \fancyfoot[C]{}
 ---
 
 ```{r setup, include=FALSE}
@@ -12,6 +17,7 @@ library(magrittr)
 library(knitr)
 library(ROCR)
 library(caret)
+library(car)
 library(mice)
 library(lars)
 insurance <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\621week4\\insurance_training_data.csv') %>%
@@ -53,7 +59,7 @@ insurance %>%
   kable()
 ```
 
-```{r, cache=TRUE}
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
 VIM::aggr(insurance[, c(-1, -2)], col=c('navyblue', 'yellow'),
           numbers=TRUE, sortVars=TRUE, 
           labels=names(insurance[, c(-1, -2)]), cex.axis=.7,
@@ -62,9 +68,9 @@ VIM::aggr(insurance[, c(-1, -2)], col=c('navyblue', 'yellow'),
 
 I will use the mice library to partition the data. Once complete I will create a new data frame that has the imputed values.
 
-```{r, cache=TRUE}
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
 set.seed(123)
-imputed.data <- mice::mice(insurance[, c(-1, -2)], m=5, maxit=50, method='pmm', seed=500)
+imputed.data <- mice::mice(insurance[, c(-1, -2)], m=5, maxit=50, method='pmm', seed=500, printFlag=FALSE)
 insurance.complete <- cbind(insurance[, c(1, 2)], complete(imputed.data, 1))
 ```
 
@@ -339,17 +345,22 @@ For the first model, I will consider only the categorical variables. This model 
 I began by adding in all the categorical predictors and then examining which, if any, should be removed from the regression. I considered 5 different methods for model selection. [SEE APPENDIX]
 
 **drop1** suggested keeping all the predictors
+
 **AIC** suggested dropping RED_CAR.CAT
+
 **BIC** suggested dropping RED_CAR.CAT
+
 **lasso** suggested dropping RED_CAR.CAT along with specific values from JOB and CAR_TYPE, which is not recommended.
+
 **manual selection** suggested RED_CAR only
 
 Based on the above 5 methods, the final version of model 1 will only drop RED_CAR.CAT
 
 ```{r, cache=TRUE}
 ctrl <- trainControl(method='repeatedcv', number=10, savePredictions=TRUE)
-model.1 <- train(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
-                   REVOKED.CAT + URBAN.CAT, data=log.training, method='glm', family='binomial',
+model.1 <- train(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + 
+                   JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + REVOKED.CAT + URBAN.CAT, 
+                 data=log.training, method='glm', family='binomial',
                  trControl=ctrl, tuneLength=5)
 summary(model.1)
 ```
@@ -359,16 +370,21 @@ summary(model.1)
 For the second model, I will begin by adding in every single predictor, running the regression and then iteratively remove terms based on my analysis. [SEE APPENDIX]
 
 **drop1** suggested keeping all the predictors
+
 **AIC** suggested dropping AGE, YOJ, CAR_AGE, MALE.CAT, RED_CAR
+
 **BIC** suggested dropping AGE, YOJ, CAR_AGE, MALE.CAT, JOB, RED_CAR
+
 **lasso** suggested dropping nothing
+
 **manual selection** suggested dropping RED_CAR, AGE, YOJ, CAR_AGE, MALE.CAT, HOMEKIDS
 
 Based on the above 5 methods, the final verison of model 2 will drop AGE, YOJ, CAR_AGE, MALE.CAT and RED_CAR.CAT
 
 ```{r, cache=TRUE}
 ctrl <- trainControl(method='repeatedcv', number=10, savePredictions=TRUE)
-model.2 <- train(TARGET_FLAG ~ . -AGE -YOJ -CAR_AGE -MALE.CAT -RED_CAR.CAT, data=log.training, method='glm', family='binomial',
+model.2 <- train(TARGET_FLAG ~ . -AGE -YOJ -CAR_AGE -MALE.CAT -RED_CAR.CAT, 
+                 data=log.training, method='glm', family='binomial',
                  trControl=ctrl, tuneLength=5)
 summary(model.2)
 ```
@@ -378,14 +394,19 @@ summary(model.2)
 Examining the diagnostic plots for model 2 indicates that there are a number of predictors that may require a quadratic term. For the final model I will add in all these potential quadratic terms and select a model from there.
 
 **drop1** suggested keeping all the predictors
+
 **AIC** suggested dropping AGE, HOMEKIDS^2, YOJ, MVR_PTS, CAR_AGE, MALE.CAT, RED_CAR
+
 **BIC** suggested dropping KIDSDRIV^2, AGE, HOMEKIDS, HOMEKIDS^2, YOJ, CLM_FREQ^2, MVR_PTS, CAR_AGE, MALE.CAT, JOB.CAT, RED_CAR.CAT
 
 I will be more aggresive with this final model and select the BIC suggestion.
 
 ```{r, cache=TRUE}
+log.training <- log.training %>%
+  mutate(MVR_PTS2 = MVR_PTS*MVR_PTS)
 ctrl <- trainControl(method='repeatedcv', number=10, savePredictions=TRUE)
-model.3 <- train(TARGET_FLAG ~ . -AGE -HOMEKIDS -YOJ - MVR_PTS -CAR_AGE -MALE.CAT -JOB.CAT -RED_CAR.CAT +I(MVR_PTS^2),
+model.3 <- train(TARGET_FLAG ~ . -AGE -HOMEKIDS -YOJ -MVR_PTS -CAR_AGE -MALE.CAT 
+                 -JOB.CAT -RED_CAR.CAT,
                  data=log.training, method='glm', family='binomial',
                  trControl=ctrl, tuneLength=5)
 summary(model.3)
@@ -393,7 +414,69 @@ summary(model.3)
 
 ##Model Selection
 
+$R^2$ does not exist for logistic regression in the traditional sense. However, there are a number of so called pseudo $R^2$ terms that can be analized. This is a good starting point for identifying the relative strength of each model.
 
+```{r}
+model.1.diag <- glm(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + 
+                      JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                   REVOKED.CAT + URBAN.CAT, data=log.training, family=binomial)
+model.2.diag <- glm(TARGET_FLAG ~ . -AGE -YOJ -CAR_AGE -MALE.CAT -RED_CAR.CAT, 
+                    data=log.training, family=binomial)
+model.3.diag <- glm(TARGET_FLAG ~ . -AGE -HOMEKIDS -YOJ - MVR_PTS -CAR_AGE -MALE.CAT 
+                    -JOB.CAT -RED_CAR.CAT +I(MVR_PTS^2), data=log.training, family=binomial)
+data_frame(name=names(pscl::pR2(model.1.diag)), value=pscl::pR2(model.1.diag)) %>% 
+  spread(1, 2) %>%
+  kable()
+data_frame(name=names(pscl::pR2(model.2.diag)), value=pscl::pR2(model.2.diag)) %>% 
+  spread(1, 2) %>%
+  kable()
+data_frame(name=names(pscl::pR2(model.3.diag)), value=pscl::pR2(model.3.diag)) %>% 
+  spread(1, 2) %>%
+  kable()
+```
+
+The first model is the weakest while the second and third are close in their psuedo-$R^2$. Next, we will examine the ROC curve to determine a good cutoff point for categorization against the testing data. All three models appear to have between 0.5 to 0.4 as a good compromise.
+
+```{r, cache=TRUE, fig.height=4, fig.width=4, fig.align='center'}
+ROCRPred <- prediction(predict(model.1.diag, type='response'), log.training$TARGET_FLAG)
+ROCRPref <- performance(ROCRPred, 'tpr', 'fpr')
+plot(ROCRPref, colorize=TRUE, print.cutoffs.at = seq(0.1, by=0.1))
+```
+
+```{r, cache=TRUE, fig.height=4, fig.width=4, fig.align='center'}
+ROCRPred <- prediction(predict(model.2.diag, type='response'), log.training$TARGET_FLAG)
+ROCRPref <- performance(ROCRPred, 'tpr', 'fpr')
+plot(ROCRPref, colorize=TRUE, print.cutoffs.at = seq(0.1, by=0.1))
+```
+
+```{r, cache=TRUE, fig.height=4, fig.width=4, fig.align='center'}
+ROCRPred <- prediction(predict(model.3.diag, type='response'), log.training$TARGET_FLAG)
+ROCRPref <- performance(ROCRPred, 'tpr', 'fpr')
+plot(ROCRPref, colorize=TRUE, print.cutoffs.at = seq(0.1, by=0.1))
+```
+
+Finally, I will create a confusion matrix for each model against the testing data.
+
+```{r}
+predictions <- ifelse(predict(model.1, newdata=log.testing, type='prob')[2] < 0.4, 0, 1)
+caret::confusionMatrix(table(predicted=predictions, actual = log.testing$TARGET_FLAG))
+```
+
+```{r}
+predictions <- ifelse(predict(model.2, newdata=log.testing, type='prob')[2] < 0.4, 0, 1)
+caret::confusionMatrix(table(predicted=predictions, actual = log.testing$TARGET_FLAG))
+```
+
+```{r}
+log.testing <- log.testing %>%
+  mutate(MVR_PTS2 = MVR_PTS*MVR_PTS)
+predictions <- ifelse(predict(model.3, newdata=log.testing, type='prob')[2] < 0.4, 0, 1)
+caret::confusionMatrix(table(predicted=predictions, actual = log.testing$TARGET_FLAG))
+```
+
+Based on all the available diagnostics, I will select **model 2**. It has consistently produces the highest quality predictions.
+
+##LINEAR REGRESSION
 
 
 #APPENDIX
@@ -402,53 +485,64 @@ summary(model.3)
 
 ##Model 1 Selection
 
-```{r, cache=TRUE}
-model.1.full <- glm(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+```{r, message=FALSE, cache=TRUE, fig.height=4, fig.width=8, fig.align='center'}
+model.1.full <- glm(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + 
+                      JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
                       RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, family=binomial, data=log.training)
 drop1(model.1.full)
-MASS::stepAIC(model.1.full)
-MASS::stepAIC(model.1.full, k=log(nrow(log.training)))
+MASS::stepAIC(model.1.full, trace=0)
+MASS::stepAIC(model.1.full, k=log(nrow(log.training)), trace=0)
 
-model.1.lasso <- lars(model.matrix(~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
-                                     RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
-plot(model.1.lasso)
 set.seed(123)
-cvlmod <- cv.lars(model.matrix(~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
-                                 RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
-cvlmod$index[which.min(cvlmod$cv)] #0.9292929
-predict(model.1.lasso, s=0.9292929, type='coef', mode='fraction')$coef
-
+model.1.lasso <- lars(model.matrix(~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT 
+                                   + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                                     RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), 
+                      as.numeric(log.training$TARGET_FLAG))
+cvlmod <- cv.lars(model.matrix(~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + 
+                                 JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                                 RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), 
+                  as.numeric(log.training$TARGET_FLAG))
+predict(model.1.lasso, s=0.9494949, type='coef', mode='fraction')$coef
 ```
 
 ##Model 2 Selection
 
-```{r, cache=TRUE}
+```{r, message=FALSE, cache=TRUE, fig.height=4, fig.width=8, fig.align='center'}
 model.2.full <- glm(TARGET_FLAG ~ KIDSDRIV + AGE + HOMEKIDS + YOJ + INCOME + 
                       HOME_VAL + TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ + 
-                      MVR_PTS + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
-                      PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, data=log.training, family=binomial)
+                      MVR_PTS + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + 
+                      EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                      RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, data=log.training, family=binomial)
 drop1(model.2.full) 
 MASS::stepAIC(model.2.full, trace=0) 
 MASS::stepAIC(model.2.full, k=log(nrow(log.training)), trace=0) 
-model.2.lasso <- lars(model.matrix(~ KIDSDRIV + AGE + HOMEKIDS + YOJ + INCOME + HOME_VAL + TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ +
-                                     MVR_PTS + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
-                                     PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
-plot(model.1.lasso)
+
 set.seed(123)
-cvlmod <- cv.lars(model.matrix(~ KIDSDRIV + AGE + HOMEKIDS + YOJ + INCOME + HOME_VAL + TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ +
-                                 MVR_PTS + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
-                                 PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
+model.2.lasso <- lars(model.matrix(~ KIDSDRIV + AGE + HOMEKIDS + YOJ + INCOME + HOME_VAL + 
+                                     TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ +
+                                     MVR_PTS + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + 
+                                     MALE.CAT + EDUCATION.CAT + JOB.CAT +
+                                     PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + 
+                                     URBAN.CAT, log.training), as.numeric(log.training$TARGET_FLAG))
+cvlmod <- cv.lars(model.matrix(~ KIDSDRIV + AGE + HOMEKIDS + YOJ + INCOME + HOME_VAL + 
+                                 TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ +
+                                 MVR_PTS + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + 
+                                 EDUCATION.CAT + JOB.CAT +
+                                 PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + 
+                                 URBAN.CAT, log.training), as.numeric(log.training$TARGET_FLAG))
 cvlmod$index[which.min(cvlmod$cv)] 
-predict(model.1.lasso, s=0.9292929, type='coef', mode='fraction')$coef
+predict(model.2.lasso, s=0.9292929, type='coef', mode='fraction')$coef
 ```
 
 ##Model 3 Selection
 
-```{r, cache=TRUE}
-model.3.full <- glm(TARGET_FLAG ~ KIDSDRIV + I(KIDSDRIV ^ 2) + AGE + HOMEKIDS + I(HOMEKIDS ^ 2) + YOJ + INCOME + 
-                      HOME_VAL + TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ + I(CLM_FREQ ^ 2) +
-                      MVR_PTS + I(MVR_PTS ^ 2) + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
-                      PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, data=log.training, family=binomial)
+```{r, message=FALSE, cache=TRUE, fig.height=4, fig.width=8, fig.align='center'}
+model.3.full <- glm(TARGET_FLAG ~ KIDSDRIV + I(KIDSDRIV ^ 2) + AGE + HOMEKIDS + 
+                      I(HOMEKIDS ^ 2) + YOJ + INCOME + HOME_VAL + TRAVTIME + BLUEBOOK + 
+                      TIF + OLDCLAIM + CLM_FREQ + I(CLM_FREQ ^ 2) + MVR_PTS + I(MVR_PTS ^ 2) + 
+                      CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
+                      PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + 
+                      URBAN.CAT, data=log.training, family=binomial)
 drop1(model.3.full) 
 MASS::stepAIC(model.3.full, trace=0) 
 MASS::stepAIC(model.3.full, k=log(nrow(log.training)), trace=0)
@@ -456,6 +550,18 @@ MASS::stepAIC(model.3.full, k=log(nrow(log.training)), trace=0)
 
 ##DIAGNOSTICS
 
+##LOGISTIC REGRESSION
 
+Multi-collinearity is not an issue for any of the three models.
 
+```{r, cahce=TRUE}
+car::vif(model.2.diag)
+```
 
+Finally, I have the mmps plots to demonstrate a good fit.
+
+```{r, message=FALSE, cache=TRUE, fig.height=4, fig.width=8, fig.align='center'}
+car::marginalModelPlots(model.2.diag)
+```
+
+##LINEAR REGRESSION
