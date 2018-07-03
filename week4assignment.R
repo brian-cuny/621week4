@@ -3,7 +3,8 @@ library(caret)
 
 insurance <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\621week4\\insurance_training_data.csv') %>%
   select(-INDEX) %>% #don't need index
-  mutate(INCOME = as.numeric(str_replace_all(INCOME, '\\D', '')),
+  mutate(TARGET_FLAG = factor(TARGET_FLAG),
+         INCOME = as.numeric(str_replace_all(INCOME, '\\D', '')),
          PARENT1.CAT = factor(ifelse(PARENT1 == 'Yes', 1, 0)),
          HOME_VAL = as.numeric(str_replace_all(HOME_VAL, '\\D', '')),
          MSTATUS.CAT = factor(ifelse(MSTATUS == 'Yes', 1, 0)),
@@ -22,6 +23,7 @@ insurance <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\62
 #small number of missing values, impute them
 insurance %>%
   map_dbl(~sum(is.na(.))/nrow(insurance))
+
 
 VIM::aggr(insurance[, c(-1, -2)], col=c('navyblue', 'yellow'),
           numbers=TRUE, sortVars=TRUE, 
@@ -81,64 +83,44 @@ Predictor.Disp <- function(x){
 
 Predictor.Discrete.Disp('KIDSDRIV')
 #Kidsdriv is discrete, heavily skewed as nearly all policy holders have 0 kids driving.
-#can't use boxcox as it requires positive data
+
+table(KIDSDRIV = log.training$KIDSDRIV, TARGET=log.training$TARGET_FLAG)
+
 
 Predictor.Disp('AGE')
 #nearly normal, no outliers. Good to go
+#don't anticipate this helping as the data is nearly identical in both distributions
 
-Predictor.Discrete.Disp('HOMEKIDS')
-#Like Kidsdriv, this is discrete, heavily skewed and mostly 0.
 
 Predictor.Disp('YOJ')
 #Nearly normal other than people without jobs. Boxplots indicate no meaning in the data
+#add logs odds?
 
 Predictor.Disp('INCOME')
-#heavily skewed, no real difference in boxplot
+#skewed, equal variance, no real difference in boxplot
 
-geoR::boxcoxfit(log.training$INCOME + 1)
-#suggests log transformation
+geoR::boxcoxfit(log.training$INCOME+1)
+#suggests sqrt transformation
 
-log.training <- log.training %>%
-  mutate(l.INCOME = log(INCOME + 1))
+
 Predictor.Disp('l.INCOME')
 #nicely normal, against expect for people without jobs
-
-cor(log.training$YOJ, log.training$INCOME)
-#decent correlation between YOJ and INCOME, may need to be addressed
-
-#PARENT1, categorical data
 
 Predictor.Disp('HOME_VAL')
 #nearly normal except for people who do not own homes
 
 geoR::boxcoxfit(log.training$HOME_VAL + 1)
-#not log transform. Maybe make categorical?
+#log transformation
 
-table(SINGLE_PARENT=log.training$PARENT1, MARRIED=log.training$MSTATUS)
-table(KIDS = log.training$HOMEKIDS, MARRIED=log.training$MSTATUS)
-
-#Married w/children
-#Married wo/children
-#Not married w/ children
-#Not married wo/ children
-
-#what if i combined homekids, parent1 and mstatus into 1 categorical variable that is 0: single, no kids 1: single, w/ kids, 2: married, no kids, 3: married, w/kids
-
-log.training <- log.training %>%
-  mutate(HOMELIFE.CAT = factor(ifelse(HOMEKIDS == 0 & MSTATUS.CAT == 0, 0, ifelse(HOMEKIDS != 0 & MSTATUS.CAT == 0, 1, ifelse(HOMEKIDS == 0 & MSTATUS.CAT == 1, 2, 3))))) %>%
-  select(-HOMEKIDS, -MSTATUS.CAT)
-
-#HOMELIFE is categorical now
-
-#EDUCATION is categorical
-
-#JOB is categorical
+Predictor.Disp('l.HOME_VAL')
 
 Predictor.Disp('TRAVTIME')
 #nearly normal, no apparent difference in boxplot
 
 geoR::boxcoxfit(log.training$TRAVTIME)
 #maybe sqrt transformation?
+
+Predictor.Disp('s.TRAVTIME')
 
 Predictor.Disp('BLUEBOOK')
 #slightly skew, no apparent different in boxplot
@@ -151,52 +133,171 @@ Predictor.Disp('TIF')
 geoR::boxcoxfit(log.training$TIF)
 #can be made normal with transformation
 
-#cartype is categorical
-
-#red_car is categorical
-
 Predictor.Disp('OLDCLAIM')
-#change to categorical
+#heavily, heavily skewed. Most people don't make claims.
 
-log.training <- log.training %>%
-  mutate(OLDCLAIM.CAT = factor(ifelse(OLDCLAIM == 0, 0, 1)))
+Predictor.Discrete.Disp('CLM_FREQ')
 
-#oldclaim.cat is categorical
+Predictor.Disp('MVR_PTS')
+#heavily skewed, apparent difference
 
-#claim frequency is oldclaim.cat, can be dropped
+Predictor.Disp('CAR_AGE')
+#bimodal, equal variance
 
-#male is categorical, derived from sex
+#MALE.CAT
+table(MALE = log.training$MALE.CAT, TARGET=log.training$TARGET_FLAG)
 
-#private is categorical, derived from car_use
+#Education.CAT
+table(EDUCATION = log.training$EDUCATION.CAT, TARGET = log.training$TARGET_FLAG)
 
-#urban is categorical, derived from urbanicity
+#PRIVATE.CAT
+table(PRIVATE = log.training$PRIVATE.CAT, TARGET = log.training$TARGET_FLAG)
 
+#CAR_TYPE.CAT
+table(CAR_TYPE = log.training$CAR_TYPE.CAT, TARGET = log.training$TARGET_FLAG)
+
+#RED_CAR.CAT
+table(RED_CAR = log.training$RED_CAR.CAT, TARGET = log.training$TARGET_FLAG)
+
+#REVOKED.CAT
+table(REVOKED = log.training$REVOKED.CAT, TARGET = log.training$TARGET_FLAG)
+
+#URBAN.CAT
+table(URBAN = log.training$URBAN.CAT, TARGET = log.training$TARGET_FLAG)
 
 #Model 1 -- all categorical
 
-model.1 <- glm(TARGET_FLAG ~ MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + REVOKED.CAT + URBAN.CAT + HOMELIFE.CAT + OLDCLAIM.CAT,
-               family=binomial, data=log.training)
+model.1.full <- glm(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                      RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, family=binomial, data=log.training)
+summary(model.1.full)
+
+model.1 <- glm(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                 REVOKED.CAT + URBAN.CAT, data=log.training)
 summary(model.1)
 
-drop1(model.1) #suggestions dropping none
-MASS::stepAIC(model.1) #only drops RED_CAR
-MASS::stepAIC(model.1, k=log(nrow(log.training))) #drops RED_CAR and JOB 
-#lasso suggests dropping RED_CAR and JOB lawyer and CAR_TYPE Panel_truck
+drop1(model.1.full) #suggestions dropping none
+MASS::stepAIC(model.1.full) #only drops RED_CAR
+MASS::stepAIC(model.1.full, k=log(nrow(log.training))) #drops RED_CAR
+#lasso suggests dropping JOB lawyer and CAR_TYPE Panel_truck, which we can't do
 #manual dropping suggests RED_CAR only
 
 library(lars)
-model.1.lasso <- lars(model.matrix(~ MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
-                                     RED_CAR.CAT + REVOKED.CAT + URBAN.CAT + HOMELIFE.CAT + OLDCLAIM.CAT, log.training), log.training$TARGET_FLAG)
+model.1.lasso <- lars(model.matrix(~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                                     RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
 plot(model.1.lasso)
 set.seed(123)
-cvlmod <- cv.lars(model.matrix(~ MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
-                    RED_CAR.CAT + REVOKED.CAT + URBAN.CAT + HOMELIFE.CAT + OLDCLAIM.CAT, log.training), log.training$TARGET_FLAG)
+cvlmod <- cv.lars(model.matrix(~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                                 RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
 cvlmod$index[which.min(cvlmod$cv)] #0.9292929
 predict(model.1.lasso, s=0.9292929, type='coef', mode='fraction')$coef
 
+#Following the various suggestions, we will only drop RED_CAR.
+anova(model.1, test='Chisq')
+
 car::vif(model.1) #correlation isn't an issue
 
+#This is a valid model and our first one
+
 #Model 2 -- everything
+
+#possible transformations
+log.training.mod <- log.training %>%
+  mutate(l.YOJ = log(YOJ + 1),
+         s.INCOME = sqrt(INCOME),
+         l.HOME_VAL = log(HOME_VAL + 1),
+         s.TRAVTIME = sqrt(TRAVTIME))
+
+log.training <- log.training %>%
+  mutate(s.INCOME = sqrt(INCOME),
+         s.BLUEBOOK = sqrt(BLUEBOOK))
+
+model.2.full <- glm(TARGET_FLAG ~ KIDSDRIV + I(KIDSDRIV ^ 2) + AGE + HOMEKIDS + I(HOMEKIDS ^ 2) + YOJ + INCOME + 
+                      HOME_VAL + TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ + I(CLM_FREQ ^ 2) +
+                      MVR_PTS + I(MVR_PTS ^ 2) + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
+                      PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, data=log.training, family=binomial)
+summary(model.2.full)
+
+model.2 <- glm(TARGET_FLAG ~ . -AGE -HOMEKIDS -YOJ -MVR_PTS -CAR_AGE -MALE.CAT -JOB.CAT -RED_CAR.CAT +I(MVR_PTS^2), 
+               data=log.training, family=binomial)
+summary(model.2)
+
+drop1(model.2.full) #doesn't want to drop any -- 2nd pass still drops none
+MASS::stepAIC(model.2.full) #drops AGE, YOJ, CAR_AGE, MALE.CAT, RED_CAR -- 2nd pass drops AGE, HOMEKIDS^2, YOJ, MVR_PTS, CAR_AGE, MALE.CAT, RED_CAR
+MASS::stepAIC(model.2.full, k=log(nrow(log.training))) #drops AGE, YOJ, CAR_AGE, MALE.CAT, JOB, RED_CAR -- 2nd pass drops KIDSDRIV^2, AGE, HOMEKIDS, HOMEKIDS^2, 
+                                                       #YOJ, CLM_FREQ^2, MVR_PTS, CAR_AGE, MALE.CAT, JOB.CAT, RED_CAR
+#lasso suggests nothing
+#manual dropping suggests RED_CAR, AGE, YOJ, CAR_AGE, MALE.CAT, HOMEKIDS
+
+#Following stepAIC we will remove 5 variables.
+anova(model.2.full, model.2)
+
+library(lars)
+model.2.lasso <- lars(model.matrix(~ KIDSDRIV + AGE + HOMEKIDS + YOJ + INCOME + HOME_VAL + TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ +
+                                     MVR_PTS + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
+                                     PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
+plot(model.1.lasso)
+set.seed(123)
+cvlmod <- cv.lars(model.matrix(~ KIDSDRIV + AGE + HOMEKIDS + YOJ + INCOME + HOME_VAL + TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ +
+                                 MVR_PTS + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
+                                 PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
+cvlmod$index[which.min(cvlmod$cv)] #0.9292929
+predict(model.1.lasso, s=0.9292929, type='coef', mode='fraction')$coef
+
+#Verifying model
+
+model.2.check <- log.training %>%
+  select(-TARGET_FLAG, -AGE, -YOJ, -CAR_AGE, -MALE.CAT, -RED_CAR.CAT) %>%
+  select_if(is.numeric)
+predictors <- colnames(model.2.check)
+probability <- predict(model.2, type='response')
+
+model.2.check <- model.2.check %>%
+  mutate(logit = log(probability/(1-probability))) %>%
+  gather(key='predictors', value='predictor.value', -logit) 
+
+ggplot(model.2.check, aes(logit, predictor.value)) +
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method='loess') +
+  theme_bw() +
+  facet_wrap(~predictors, scales = 'free_y')
+
+#suggests that we add a quadradic term for clm_freq, homekids, kidsdriv, and mvr_pts
+car::vif(model.2)
+car::marginalModelPlots(model.2)
+
+Marginal.Model <- function(p){
+  yhat <- predict(model.2, type='response')
+  p <- ggplot(log.training, aes_string(p, 'TARGET_FLAG')) +
+    geom_point() + 
+    geom_smooth(method='loess', se=FALSE) +
+    geom_smooth(aes(y=yhat), method='loess', se = FALSE, color='red', linetype='dotted')
+  return(p)
+}
+
+alr3::residual.plots(model.2)
+
+Marginal.Model('KIDSDRIV')
+Marginal.Model('INCOME')
+Marginal.Model('HOME_VAL')
+Marginal.Model('TRAVTIME')
+Marginal.Model('BLUEBOOK')
+Marginal.Model('TIF')
+Marginal.Model('OLDCLAIM')
+Marginal.Model('CLM_FREQ')
+
+car::vif(model.2)
+car::marginalModelPlots(model.2)
+
+
+p <- ifelse(predict(model.2, newdata=log.testing, type='response') > 0.5, 1, 0)
+x <- table(predicted = p, actual = log.testing$TARGET_FLAG)
+
+caret::confusionMatrix(x)
+
+
+
+
+
 
 
 
