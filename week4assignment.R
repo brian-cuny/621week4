@@ -336,9 +336,6 @@ ggplot(lin.training, aes(TRAVTIME, log(TARGET_AMT))) +
   geom_point() +
   geom_smooth(method='lm')
 
-#KIDSDRIV not continuous...what do?
-#HOMEKIDS not continuous
-#YOJ not continous
 
 
 
