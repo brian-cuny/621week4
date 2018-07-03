@@ -1,0 +1,461 @@
+---
+title: "Untitled"
+author: "group1"
+date: "July 3, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(magrittr)
+library(knitr)
+library(ROCR)
+library(caret)
+library(mice)
+library(lars)
+insurance <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\621week4\\insurance_training_data.csv') %>%
+  select(-INDEX) %>% #don't need index
+  mutate(TARGET_FLAG = factor(TARGET_FLAG),
+         INCOME = as.numeric(str_replace_all(INCOME, '\\D', '')),
+         PARENT1.CAT = factor(ifelse(PARENT1 == 'Yes', 1, 0)),
+         HOME_VAL = as.numeric(str_replace_all(HOME_VAL, '\\D', '')),
+         MSTATUS.CAT = factor(ifelse(MSTATUS == 'Yes', 1, 0)),
+         MALE.CAT = factor(ifelse(SEX == 'M', 1, 0)),
+         EDUCATION.CAT = factor(ifelse(EDUCATION == 'z_High School', 'High School', EDUCATION)),
+         JOB.CAT = factor(ifelse(JOB == 'z_Blue Collar', 'Blue Collar', JOB)),
+         PRIVATE.CAT = factor(ifelse(CAR_USE == 'Private', 1, 0)),
+         BLUEBOOK = as.numeric(str_replace_all(BLUEBOOK, '\\D', '')),
+         CAR_TYPE.CAT = factor(ifelse(CAR_TYPE == 'z_SUV', 'SUV', CAR_TYPE)),
+         RED_CAR.CAT = factor(ifelse(RED_CAR == 'yes', 1, 0)),
+         OLDCLAIM = as.numeric(str_replace_all(OLDCLAIM, '\\D', '')),
+         REVOKED.CAT = factor(ifelse(REVOKED == 'Yes', 1, 0)),
+         URBAN.CAT = factor(ifelse(URBANICITY == 'Highly Urban/ Urban', 1, 0))) %>%
+  select(-SEX, -URBANICITY, -CAR_USE, -MSTATUS, -PARENT1, -JOB, -CAR_TYPE, -REVOKED, -RED_CAR, -EDUCATION)
+```
+
+# Abstract
+
+I have been tasked with developing a logistic regression and a multiple linear regression that will determine (1) the likelyhood that a policy holder will make a claim on their car and (2) given that a claim is made, how much will it cost. Using both of these models we will be able to set rates for car insurance based on a number of predictors ranging from income, distance to work or number of kids at home. Their are 8161 observations in the training set with 23 predictors. There are 2 response variables, the binary value indicating whether a claim was made and a numeric value indicating the cost of said cliam.
+
+I will develop three logistic regression models, explore each, and ultimately select the strongest model to use on the evaluation set.
+I will then develop two multiple linear regressions, explore both, and select the strongest model to use on the evaluation set.
+
+I will begin by exploring the data set as a whole and then each individual predictor.
+
+# Data Exploration
+
+Initial inspection of the data shows a small number of missing values in AGE, YOJ, INCOME, HOME_VAL, CAR_AGE and JOB.CAT. Considering the small number of missing values, it is reasonble to impute them. The below plot shows the distribution of the missing values.
+
+```{r, cache=TRUE}
+insurance %>%
+  map_dbl(~sum(is.na(.))/nrow(insurance)) %>%
+  kable()
+```
+
+```{r, cache=TRUE}
+VIM::aggr(insurance[, c(-1, -2)], col=c('navyblue', 'yellow'),
+          numbers=TRUE, sortVars=TRUE, 
+          labels=names(insurance[, c(-1, -2)]), cex.axis=.7,
+          gap=3, ylab=c('Missing Data', 'Pattern'), combined=TRUE)
+```
+
+I will use the mice library to partition the data. Once complete I will create a new data frame that has the imputed values.
+
+```{r, cache=TRUE}
+set.seed(123)
+imputed.data <- mice::mice(insurance[, c(-1, -2)], m=5, maxit=50, method='pmm', seed=500)
+insurance.complete <- cbind(insurance[, c(1, 2)], complete(imputed.data, 1))
+```
+
+I will partition the data into a training set (80%) and a testing set (20%), seperate from the evaluation set that I will use on the selected model. After partitioning the data, I will use 10-fold cross-validation in training my models. About 25% of the customers in the full training set made a claim. This will be reflected in the partition.
+
+```{r, cache=TRUE}
+set.seed(1)
+part <- caret::createDataPartition(insurance.complete$TARGET_FLAG, p=0.8, list=FALSE)
+log.training <- insurance.complete[, -2] %>%
+  filter(row_number() %in% part)
+log.testing <- insurance.complete[, -2] %>%
+  filter(!row_number() %in% part)
+```
+
+With all the values imputed, I am ready to start my initial exploration of the predictors. I created two functions to help with this analysis.
+
+```{r, cache=TRUE}
+Predictor.Discrete.Disp <- function(x){
+  require(gridExtra)
+  plot.1 <- ggplot(log.training, aes_string(x)) +
+    geom_bar() +
+    labs(y = 'Count',
+    title = 'Predictor Distribution') +
+    theme_bw() +
+    scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(expand = c(0, 0, 0.05, 0.05))
+  
+  plot.2 <- 
+    log.training %>%
+    mutate(TARGET_FLAG = factor(TARGET_FLAG)) %>%
+    ggplot(aes_string('TARGET_FLAG', x)) +
+    geom_boxplot() +
+    geom_jitter(alpha=0.2) +
+    theme_bw() +
+    labs(x='',
+         y='',
+         title='Variance by Target Value') +
+    scale_x_discrete(labels = c('No Claim', 'Claim')) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major.x = element_blank())
+  
+  grid.arrange(plot.1, plot.2, ncol=2)
+}
+
+Predictor.Disp <- function(x){
+  require(gridExtra)
+  plot.1 <- ggplot(log.training, aes_string(x)) +
+    geom_density() +
+    labs(y = 'Density',
+    title = 'Predictor Distribution') +
+    theme_bw() +
+    scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(expand = c(0, 0, 0.05, 0.05))
+  
+  plot.2 <- 
+    log.training %>%
+    mutate(TARGET_FLAG = factor(TARGET_FLAG)) %>%
+    ggplot(aes_string('TARGET_FLAG', x)) +
+    geom_boxplot() +
+    geom_point(alpha=0.2) +
+    theme_bw() +
+    labs(x='',
+         y='',
+         title='Variance by Target Value') +
+    scale_x_discrete(labels = c('No Claim', 'Claim')) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major.x = element_blank())
+  
+  grid.arrange(plot.1, plot.2, ncol=2)
+}
+```
+
+##KIDSDRIV
+
+**The number of kids that drive the car on the policy**
+
+This predictor is discrete with values ranging only from 0 to 4. It is heavily skewed with most cars having 0 kid drivers. Examining the table of values, it appears
+that having any number of kid driver's results in a higher likelyhood of making a claim.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Discrete.Disp('KIDSDRIV')
+table(KIDSDRIV = log.training$KIDSDRIV, TARGET=log.training$TARGET_FLAG)
+```
+
+##AGE
+
+**Age of the Driver**
+
+Age has a nice, normal distribution centered around 45. The distribution based on whether a claim is made or not is nearly identical. This leads me to believe that age will not be helpful in determining the likelyhook of making a claim.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Disp('AGE')
+```
+
+##YOJ
+
+**Years On Job**
+
+This predictor is nearly normal other than people who are currently unemployed. The distribution when seperated by predictor shows no meanginful difference. It is unlikely that we will use this variable.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Disp('YOJ')
+```
+
+##INCOME
+
+**Yearly Income**
+
+Income is, just like in the general population, heavily skewed. This is represented in the boxplot as well as there are numerous upper outliers in both cases. The correlation between YOJ and INCOME is not as large as one might imagine.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Disp('INCOME')
+```
+
+##HOME_VAL
+
+**Value of Home**
+
+Usefullness of this predictor may be dented by the large number of people who do not own a home. It may be worth considering seperating this into a categorical variable represnting whether or not someone owns a home. The value of the home may be captured by INCOME.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Disp('HOME_VAL')
+```
+
+##TRAVTIME
+
+**Distance to Work**
+
+The distance travelled to work is fairly normal and the boxplots show only a subtle increase in the likelyhood of making a claim.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Disp('TRAVTIME')
+```
+
+##BLUEBOOK
+
+**Value of Vehicle**
+
+The boxplot indicates that those making a claim have a car that is lower in value. Could this be that more expensive cars are driven more carefully due to their cost or is this a confounding variable that once again measures INCOME?
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Disp('BLUEBOOK')
+```
+
+##TIF
+
+**Length of Stay with Company**
+
+The density plot of this predictor indicates that it could be considered as discrete. There appears to be a significant decrease in the likelyhood of making a claim the longer the person has been with the company. That is, safe drivers tend to stay safe.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Disp('TIF')
+```
+
+##OLDCLAIM
+
+**Claims cost made in the Past 5 Years**
+
+Heavily, heavily skewed predictor. Most people do not make claims.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Disp('OLDCLAIM')
+```
+
+##CLM_FREQ
+
+**Number of claims made in the Past 5 Years**
+
+This predictor appears to be highly significant against people who have made a past claim. That is, people who have made a claim in the past 5 years are very likely to make another claim.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Discrete.Disp('CLM_FREQ')
+table(MALE = log.training$MALE.CAT, TARGET=log.training$TARGET_FLAG)
+```
+
+##MVR_PTS
+
+**Motor Vehicle Record Points**
+
+This predictor can be seen as a proxy for how safe a driver someone is. Receiving points on a license indicates that the driver has likely been caught speeding, tailgating or other dangerous driving activities. The boxplot indicates that this variable is likely to be highly significant.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Disp('MVR_PTS')
+```
+
+##CAR_AGE
+
+** Age of the Vehicle **
+
+This predictor is bimodal, indicating that most cars are either brand new or quite old. There is one data point that is clearly mislabeled as it indicates the car is -3 years old. This will be corrected to 0. There is no indication whether 0, 3 or some other number is the correct choice but considering it is one value amongst many 10s of thousands it is unlikely to have any meaningful effect on the regression.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
+Predictor.Disp('CAR_AGE')
+```
+
+##MALE.CAT
+
+**Categorical 0 is Female, 1 if Male**
+
+This variable was derived from SEX, just to make the variable's meaning more clear. There appears to be no meanginful difference when considering the gender of the driver.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE}
+table(MALE = log.training$MALE.CAT, TARGET=log.training$TARGET_FLAG)
+```
+
+##EDUCATION.CAT
+
+**Categorical representing max education level**
+
+This variable will need to be monitoring as it may be correlated with INCOME or YOJ.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE}
+table(EDUCATION = log.training$EDUCATION.CAT, TARGET = log.training$TARGET_FLAG)
+```
+
+##PRIVATE.CAT
+
+**Categorical 0 is commerical, 1 if private**
+
+This variable was derived from CAR_USE, just to make the variable's meaning more clear.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE}
+table(PRIVATE = log.training$PRIVATE.CAT, TARGET = log.training$TARGET_FLAG)
+```
+
+##CAR_TYPE.CAT
+
+**Categorical representing the car's type**
+
+Certain cars are popular with more aggressive or less safe drivers. This may assist in identifying the likelyhood of making a claim.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE}
+table(CAR_TYPE = log.training$CAR_TYPE.CAT, TARGET = log.training$TARGET_FLAG)
+```
+
+##RED_CAR.CAT
+
+**Categorical 0 if not Red, 1 if Red**
+
+Urban legend states that red cars stand out to police officers and are thus more likely to get pulled over or find themselves in perilous situations.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE}
+table(RED_CAR = log.training$RED_CAR.CAT, TARGET = log.training$TARGET_FLAG)
+```
+
+##REVOKED.CAT##
+
+**Categorical 0 is license not revoked, 1 is revoked**
+
+The table's distribution paints a bleak picture that customers who have previously lost their license are likely to be in future accidents.
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE}
+table(REVOKED = log.training$REVOKED.CAT, TARGET = log.training$TARGET_FLAG)
+```
+
+##URBAN.CAT##
+
+**Categorical 0 is not urban home/work area, 1 is urban home/work area**
+
+This variable can be seen as a proxy for whether the driver frequently uses highways. Urban driving is more likely to result in making a claim, but highway claims are more likely to be expensive. (Collisions at 25mph are obviously less damaging than at 65mph).
+
+```{r, message=FALSE, echo=FALSE, cache=TRUE}
+table(URBAN = log.training$URBAN.CAT, TARGET = log.training$TARGET_FLAG)
+```
+
+#Logistic Regression
+
+##Model 1
+
+For the first model, I will consider only the categorical variables. This model has the advantage of being the most easily interpretable and the easiest to calculate for future customers. 
+
+I began by adding in all the categorical predictors and then examining which, if any, should be removed from the regression. I considered 5 different methods for model selection. [SEE APPENDIX]
+
+**drop1** suggested keeping all the predictors
+**AIC** suggested dropping RED_CAR.CAT
+**BIC** suggested dropping RED_CAR.CAT
+**lasso** suggested dropping RED_CAR.CAT along with specific values from JOB and CAR_TYPE, which is not recommended.
+**manual selection** suggested RED_CAR only
+
+Based on the above 5 methods, the final version of model 1 will only drop RED_CAR.CAT
+
+```{r, cache=TRUE}
+ctrl <- trainControl(method='repeatedcv', number=10, savePredictions=TRUE)
+model.1 <- train(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                   REVOKED.CAT + URBAN.CAT, data=log.training, method='glm', family='binomial',
+                 trControl=ctrl, tuneLength=5)
+summary(model.1)
+```
+
+##Model 2
+
+For the second model, I will begin by adding in every single predictor, running the regression and then iteratively remove terms based on my analysis. [SEE APPENDIX]
+
+**drop1** suggested keeping all the predictors
+**AIC** suggested dropping AGE, YOJ, CAR_AGE, MALE.CAT, RED_CAR
+**BIC** suggested dropping AGE, YOJ, CAR_AGE, MALE.CAT, JOB, RED_CAR
+**lasso** suggested dropping nothing
+**manual selection** suggested dropping RED_CAR, AGE, YOJ, CAR_AGE, MALE.CAT, HOMEKIDS
+
+Based on the above 5 methods, the final verison of model 2 will drop AGE, YOJ, CAR_AGE, MALE.CAT and RED_CAR.CAT
+
+```{r, cache=TRUE}
+ctrl <- trainControl(method='repeatedcv', number=10, savePredictions=TRUE)
+model.2 <- train(TARGET_FLAG ~ . -AGE -YOJ -CAR_AGE -MALE.CAT -RED_CAR.CAT, data=log.training, method='glm', family='binomial',
+                 trControl=ctrl, tuneLength=5)
+summary(model.2)
+```
+
+##Model 3
+
+Examining the diagnostic plots for model 2 indicates that there are a number of predictors that may require a quadratic term. For the final model I will add in all these potential quadratic terms and select a model from there.
+
+**drop1** suggested keeping all the predictors
+**AIC** suggested dropping AGE, HOMEKIDS^2, YOJ, MVR_PTS, CAR_AGE, MALE.CAT, RED_CAR
+**BIC** suggested dropping KIDSDRIV^2, AGE, HOMEKIDS, HOMEKIDS^2, YOJ, CLM_FREQ^2, MVR_PTS, CAR_AGE, MALE.CAT, JOB.CAT, RED_CAR.CAT
+
+I will be more aggresive with this final model and select the BIC suggestion.
+
+```{r, cache=TRUE}
+ctrl <- trainControl(method='repeatedcv', number=10, savePredictions=TRUE)
+model.3 <- train(TARGET_FLAG ~ . -AGE -HOMEKIDS -YOJ - MVR_PTS -CAR_AGE -MALE.CAT -JOB.CAT -RED_CAR.CAT +I(MVR_PTS^2),
+                 data=log.training, method='glm', family='binomial',
+                 trControl=ctrl, tuneLength=5)
+summary(model.3)
+```
+
+##Model Selection
+
+
+
+
+#APPENDIX
+
+##LOGISTIC REGRESSION
+
+##Model 1 Selection
+
+```{r, cache=TRUE}
+model.1.full <- glm(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                      RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, family=binomial, data=log.training)
+drop1(model.1.full)
+MASS::stepAIC(model.1.full)
+MASS::stepAIC(model.1.full, k=log(nrow(log.training)))
+
+model.1.lasso <- lars(model.matrix(~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                                     RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
+plot(model.1.lasso)
+set.seed(123)
+cvlmod <- cv.lars(model.matrix(~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                                 RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
+cvlmod$index[which.min(cvlmod$cv)] #0.9292929
+predict(model.1.lasso, s=0.9292929, type='coef', mode='fraction')$coef
+
+```
+
+##Model 2 Selection
+
+```{r, cache=TRUE}
+model.2.full <- glm(TARGET_FLAG ~ KIDSDRIV + AGE + HOMEKIDS + YOJ + INCOME + 
+                      HOME_VAL + TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ + 
+                      MVR_PTS + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
+                      PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, data=log.training, family=binomial)
+drop1(model.2.full) 
+MASS::stepAIC(model.2.full, trace=0) 
+MASS::stepAIC(model.2.full, k=log(nrow(log.training)), trace=0) 
+model.2.lasso <- lars(model.matrix(~ KIDSDRIV + AGE + HOMEKIDS + YOJ + INCOME + HOME_VAL + TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ +
+                                     MVR_PTS + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
+                                     PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
+plot(model.1.lasso)
+set.seed(123)
+cvlmod <- cv.lars(model.matrix(~ KIDSDRIV + AGE + HOMEKIDS + YOJ + INCOME + HOME_VAL + TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ +
+                                 MVR_PTS + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
+                                 PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, log.training), log.training$TARGET_FLAG)
+cvlmod$index[which.min(cvlmod$cv)] 
+predict(model.1.lasso, s=0.9292929, type='coef', mode='fraction')$coef
+```
+
+##Model 3 Selection
+
+```{r, cache=TRUE}
+model.3.full <- glm(TARGET_FLAG ~ KIDSDRIV + I(KIDSDRIV ^ 2) + AGE + HOMEKIDS + I(HOMEKIDS ^ 2) + YOJ + INCOME + 
+                      HOME_VAL + TRAVTIME + BLUEBOOK + TIF + OLDCLAIM + CLM_FREQ + I(CLM_FREQ ^ 2) +
+                      MVR_PTS + I(MVR_PTS ^ 2) + CAR_AGE + PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT +
+                      PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, data=log.training, family=binomial)
+drop1(model.3.full) 
+MASS::stepAIC(model.3.full, trace=0) 
+MASS::stepAIC(model.3.full, k=log(nrow(log.training)), trace=0)
+```
+
+##DIAGNOSTICS
+
+
+
+

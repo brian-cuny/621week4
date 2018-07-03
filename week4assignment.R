@@ -166,6 +166,14 @@ table(REVOKED = log.training$REVOKED.CAT, TARGET = log.training$TARGET_FLAG)
 table(URBAN = log.training$URBAN.CAT, TARGET = log.training$TARGET_FLAG)
 
 #Model 1 -- all categorical
+log.training <- log.training %>%
+  mutate(TARGET_FLAG = factor(TARGET_FLAG))
+
+ctrl <- trainControl(method='repeatedcv', number=10, savePredictions=TRUE)
+mod_fit <- train(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
+                   REVOKED.CAT + URBAN.CAT, data=log.training, method='glm', family='binomial',
+                 trControl=ctrl, tuneLength=5)
+summary(mod_fit)
 
 model.1.full <- glm(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATION.CAT + JOB.CAT + PRIVATE.CAT + CAR_TYPE.CAT + 
                       RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, family=binomial, data=log.training)
@@ -217,7 +225,7 @@ model.2.full <- glm(TARGET_FLAG ~ KIDSDRIV + I(KIDSDRIV ^ 2) + AGE + HOMEKIDS + 
                       PRIVATE.CAT + CAR_TYPE.CAT + RED_CAR.CAT + REVOKED.CAT + URBAN.CAT, data=log.training, family=binomial)
 summary(model.2.full)
 
-model.2 <- glm(TARGET_FLAG ~ . -AGE -HOMEKIDS -YOJ -MVR_PTS -CAR_AGE -MALE.CAT -JOB.CAT -RED_CAR.CAT +I(MVR_PTS^2), 
+model.2 <- glm(TARGET_FLAG ~ . +I(KIDSDRIV^2) -AGE -YOJ +I(CLM_FREQ^2) -MVR_PTS -CAR_AGE -MALE.CAT -JOB.CAT -RED_CAR.CAT +I(MVR_PTS^2), 
                data=log.training, family=binomial)
 summary(model.2)
 
@@ -247,6 +255,9 @@ predict(model.1.lasso, s=0.9292929, type='coef', mode='fraction')$coef
 
 model.2.check <- log.training %>%
   select(-TARGET_FLAG, -AGE, -YOJ, -CAR_AGE, -MALE.CAT, -RED_CAR.CAT) %>%
+  mutate(KIDSDRIV2 = KIDSDRIV*KIDSDRIV,
+         CLM_FREQ2 = CLM_FREQ*CLM_FREQ,
+         MVR_PTS2 = MVR_PTS*MVR_PTS) %>%
   select_if(is.numeric)
 predictors <- colnames(model.2.check)
 probability <- predict(model.2, type='response')
@@ -269,8 +280,8 @@ Marginal.Model <- function(p){
   yhat <- predict(model.2, type='response')
   p <- ggplot(log.training, aes_string(p, 'TARGET_FLAG')) +
     geom_point() + 
-    geom_smooth(method='loess', se=FALSE) +
-    geom_smooth(aes(y=yhat), method='loess', se = FALSE, color='red', linetype='dotted')
+    geom_smooth(method='gam', se=FALSE) +
+    geom_smooth(aes(y=yhat), method='gam', se = FALSE, color='red', linetype='dotted')
   return(p)
 }
 
@@ -289,13 +300,24 @@ car::vif(model.2)
 car::marginalModelPlots(model.2)
 
 
+#Model 3
+
+#I will use BIC to reduce categories at much as possible.
+
+model.2 <- glm(TARGET_FLAG ~ . +I(KIDSDRIV^2) -AGE -YOJ +I(CLM_FREQ^2) -MVR_PTS -CAR_AGE -MALE.CAT -JOB.CAT -RED_CAR.CAT +I(MVR_PTS^2), 
+               data=log.training, family=binomial)
+summary(model.2)
+
+
+
+
 p <- ifelse(predict(model.2, newdata=log.testing, type='response') > 0.5, 1, 0)
 x <- table(predicted = p, actual = log.testing$TARGET_FLAG)
 
 caret::confusionMatrix(x)
 
 
-
+termplot(model.2, partial.resid=TRUE, smooth=panel.smooth, terms=1:6)
 
 
 
