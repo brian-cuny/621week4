@@ -5,7 +5,7 @@ output:
 header-includes:
   \usepackage{fancyhdr}
   \pagestyle{fancy}
-  \fancyhead[L]{\textbf{CRIME ANALYSIS AND PREDICTION VIA LOGISTIC REGRESSION}}
+  \fancyhead[L]{\textbf{Claim and Claim Cost Via Regression}}
   \fancyhead[R]{\thepage}
   \fancyfoot[C]{}
 ---
@@ -51,7 +51,9 @@ I will begin by exploring the data set as a whole and then each individual predi
 
 # Data Exploration
 
-Initial inspection of the data shows a small number of missing values in AGE, YOJ, INCOME, HOME_VAL, CAR_AGE and JOB.CAT. Considering the small number of missing values, it is reasonble to impute them. The below plot shows the distribution of the missing values.
+Upon reading in the provided data, I made a small number of changes to the names of the columns to aid in my work. Categorical variables have a '.CAT' added to the end and variables with responses such as 'yes/no' have been changed to '1/0' with a more identifying value. For example 'SEX' became 'MALE.CAT'. A number of responses also had odd artifcats that needed to be addressed. 
+
+After cleaning up the data, their values were explored. Initial inspection of the data shows a small number of missing values in AGE, YOJ, INCOME, HOME_VAL, CAR_AGE and JOB.CAT. Considering the small number of missing values, it is reasonble to impute them. The below plot shows the distribution of the missing values.
 
 ```{r, cache=TRUE}
 insurance %>%
@@ -66,11 +68,12 @@ VIM::aggr(insurance[, c(-1, -2)], col=c('navyblue', 'yellow'),
           gap=3, ylab=c('Missing Data', 'Pattern'), combined=TRUE)
 ```
 
-I will use the mice library to partition the data. Once complete I will create a new data frame that has the imputed values.
+I will use the mice library to impute the data. Once complete I will create a new data frame that has the imputed values.
 
 ```{r, cache=TRUE, message=FALSE, warning=FALSE}
 set.seed(123)
-imputed.data <- mice::mice(insurance[, c(-1, -2)], m=5, maxit=50, method='pmm', seed=500, printFlag=FALSE)
+imputed.data <- mice::mice(insurance[, c(-1, -2)], m=5, maxit=50, method='pmm', 
+                           seed=500, printFlag=FALSE)
 insurance.complete <- cbind(insurance[, c(1, 2)], complete(imputed.data, 1))
 ```
 
@@ -94,9 +97,9 @@ lin.testing <- lm.insurance.complete[, -1] %>%
   filter(!row_number() %in% part)
 ```
 
-With all the values imputed, I am ready to start my initial exploration of the predictors. I created two functions to help with this analysis.
+With all the values imputed, I am ready to start my initial exploration of the predictors. I created three functions to help with this analysis.
 
-```{r, cache=TRUE}
+```{r, cache=TRUE, echo=FALSE}
 Predictor.Discrete.Disp <- function(x){
   require(gridExtra)
   plot.1 <- ggplot(log.training, aes_string(x)) +
@@ -121,7 +124,13 @@ Predictor.Discrete.Disp <- function(x){
     theme(panel.grid.minor = element_blank(),
           panel.grid.major.x = element_blank())
   
-  grid.arrange(plot.1, plot.2, ncol=2)
+  plot.3 <-   ggplot(lin.training, aes_string(x=x)) +
+    geom_point(aes(y=log(TARGET_AMT))) +
+    geom_smooth(aes(y=log(TARGET_AMT)), method='lm') +
+    theme_bw() +
+    labs(x = 'Predictor',
+         y = 'Log Response')
+  grid.arrange(plot.1, plot.2, plot.3, ncol=2)
 }
 
 Predictor.Disp <- function(x){
@@ -148,16 +157,13 @@ Predictor.Disp <- function(x){
     theme(panel.grid.minor = element_blank(),
           panel.grid.major.x = element_blank())
   
-  grid.arrange(plot.1, plot.2, ncol=2)
-}
-
-Predictor.Linear <- function(x){
-  ggplot(lin.training, aes_string(x=x)) +
+  plot.3 <-   ggplot(lin.training, aes_string(x=x)) +
     geom_point(aes(y=log(TARGET_AMT))) +
     geom_smooth(aes(y=log(TARGET_AMT)), method='lm') +
     theme_bw() +
     labs(x = 'Predictor',
          y = 'Log Response')
+  grid.arrange(plot.1, plot.2, plot.3, ncol=2)
 }
 ```
 
@@ -170,8 +176,6 @@ that having any number of kid driver's results in a higher likelyhood of making 
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Discrete.Disp('KIDSDRIV')
-table(KIDSDRIV = log.training$KIDSDRIV, TARGET=log.training$TARGET_FLAG)
-Predictor.Linear('KIDSDRIV')
 ```
 
 ##AGE
@@ -182,7 +186,6 @@ Age has a nice, normal distribution centered around 45. The distribution based o
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('AGE')
-Predictor.Linear('AGE')
 ```
 
 ##YOJ
@@ -193,7 +196,6 @@ This predictor is nearly normal other than people who are currently unemployed. 
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('YOJ')
-Predictor.Linear('YOJ')
 ```
 
 ##INCOME
@@ -206,7 +208,6 @@ There are outliers on INCOME that may need to be addressed when refering to the 
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('INCOME')
-Predictor.Linear('INCOME')
 ```
 
 ##HOME_VAL
@@ -217,7 +218,6 @@ Usefullness of this predictor may be dented by the large number of people who do
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('HOME_VAL')
-Predictor.Linear('HOME_VAL')
 ```
 
 ##TRAVTIME
@@ -228,7 +228,6 @@ The distance travelled to work is fairly normal and the boxplots show only a sub
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('TRAVTIME')
-Predictor.Linear('TRAVTIME')
 ```
 
 ##BLUEBOOK
@@ -241,7 +240,6 @@ BLUEBOOK is the only variable that appears to show any ability to capture the va
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('BLUEBOOK')
-Predictor.Linear('BLUEBOOK')
 ```
 
 ##TIF
@@ -252,7 +250,6 @@ The density plot of this predictor indicates that it could be considered as disc
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('TIF')
-Predictor.Linear('TIF')
 ```
 
 ##OLDCLAIM
@@ -263,7 +260,6 @@ Heavily, heavily skewed predictor. Most people do not make claims.
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Disp('OLDCLAIM')
-Predictor.Linear('OLDCLAIM')
 ```
 
 ##CLM_FREQ
@@ -274,7 +270,6 @@ This predictor appears to be highly significant against people who have made a p
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE, fig.height=4, fig.width=10, fig.align='center'}
 Predictor.Discrete.Disp('CLM_FREQ')
-table(MALE = log.training$MALE.CAT, TARGET=log.training$TARGET_FLAG)
 ```
 
 ##MVR_PTS
@@ -289,7 +284,7 @@ Predictor.Disp('MVR_PTS')
 
 ##CAR_AGE
 
-** Age of the Vehicle **
+**Age of the Vehicle**
 
 This predictor is bimodal, indicating that most cars are either brand new or quite old. There is one data point that is clearly mislabeled as it indicates the car is -3 years old. This will be corrected to 0. There is no indication whether 0, 3 or some other number is the correct choice but considering it is one value amongst many 10s of thousands it is unlikely to have any meaningful effect on the regression.
 
@@ -311,7 +306,7 @@ table(MALE = log.training$MALE.CAT, TARGET=log.training$TARGET_FLAG)
 
 **Categorical representing max education level**
 
-This variable will need to be monitoring as it may be correlated with INCOME or YOJ.
+This variable will need to be monitored as it may be correlated with INCOME or YOJ.
 
 ```{r, message=FALSE, echo=FALSE, cache=TRUE}
 table(EDUCATION = log.training$EDUCATION.CAT, TARGET = log.training$TARGET_FLAG)
@@ -371,7 +366,7 @@ table(URBAN = log.training$URBAN.CAT, TARGET = log.training$TARGET_FLAG)
 
 ##Model 1
 
-For the first model, I will consider only the categorical variables. This model has the advantage of being the most easily interpretable and the easiest to calculate for future customers. 
+For the first model, I will consider only the categorical variables. This model has the advantage of being easily interpretable and the easiest to calculate for future customers. 
 
 I began by adding in all the categorical predictors and then examining which, if any, should be removed from the regression. I considered 5 different methods for model selection. [SEE APPENDIX]
 
@@ -381,9 +376,9 @@ I began by adding in all the categorical predictors and then examining which, if
 
 **BIC** suggested dropping RED_CAR.CAT
 
-**lasso** suggested dropping RED_CAR.CAT along with specific values from JOB and CAR_TYPE, which is not recommended.
+**lasso** suggested dropping RED_CAR.CAT along with specific values from JOB.CAT and CAR_TYPE.CAT, which is not recommended.
 
-**manual selection** suggested RED_CAR only
+**manual selection** suggested RED_CAR.CAT only
 
 Based on the above 5 methods, the final version of model 1 will only drop RED_CAR.CAT
 
@@ -402,13 +397,13 @@ For the second model, I will begin by adding in every single predictor, running 
 
 **drop1** suggested keeping all the predictors
 
-**AIC** suggested dropping AGE, YOJ, CAR_AGE, MALE.CAT, RED_CAR
+**AIC** suggested dropping AGE, YOJ, CAR_AGE, MALE.CAT, RED_CAR.CAT
 
-**BIC** suggested dropping AGE, YOJ, CAR_AGE, MALE.CAT, JOB, RED_CAR
+**BIC** suggested dropping AGE, YOJ, CAR_AGE, MALE.CAT, JOB.CAT, RED_CAR.CAT
 
 **lasso** suggested dropping nothing
 
-**manual selection** suggested dropping RED_CAR, AGE, YOJ, CAR_AGE, MALE.CAT, HOMEKIDS
+**manual selection** suggested dropping RED_CAR.CAT, AGE, YOJ, CAR_AGE, MALE.CAT, HOMEKIDS
 
 Based on the above 5 methods, the final verison of model 2 will drop AGE, YOJ, CAR_AGE, MALE.CAT and RED_CAR.CAT
 
@@ -443,7 +438,7 @@ model.3 <- train(TARGET_FLAG ~ . -AGE -HOMEKIDS -YOJ -MVR_PTS -CAR_AGE -MALE.CAT
 summary(model.3)
 ```
 
-##Model Selection
+##Logistic Model Selection
 
 $R^2$ does not exist for logistic regression in the traditional sense. However, there are a number of so called pseudo $R^2$ terms that can be analized. This is a good starting point for identifying the relative strength of each model.
 
@@ -454,7 +449,8 @@ model.1.diag <- glm(TARGET_FLAG ~ PARENT1.CAT + MSTATUS.CAT + MALE.CAT + EDUCATI
 model.2.diag <- glm(TARGET_FLAG ~ . -AGE -YOJ -CAR_AGE -MALE.CAT -RED_CAR.CAT, 
                     data=log.training, family=binomial)
 model.3.diag <- glm(TARGET_FLAG ~ . -AGE -HOMEKIDS -YOJ - MVR_PTS -CAR_AGE -MALE.CAT 
-                    -JOB.CAT -RED_CAR.CAT +I(MVR_PTS^2), data=log.training, family=binomial)
+                    -JOB.CAT -RED_CAR.CAT +I(MVR_PTS^2), 
+                    data=log.training, family=binomial)
 data_frame(name=names(pscl::pR2(model.1.diag)), value=pscl::pR2(model.1.diag)) %>% 
   spread(1, 2) %>%
   kable()
@@ -505,13 +501,13 @@ predictions <- ifelse(predict(model.3, newdata=log.testing, type='prob')[2] < 0.
 caret::confusionMatrix(table(predicted=predictions, actual = log.testing$TARGET_FLAG))
 ```
 
-Based on all the available diagnostics, I will select **model 2**. It has consistently produces the highest quality predictions.
+Based on all the available diagnostics, I will select **model 2**. It has the highest pseudo-$R^2$, it performed the strongest on the testing set and has the lowest AIC.
 
 #LINEAR REGRESSION
 
 ## Model 4
 
-The initial exploratio does not bode well for the linear regression. None of the predictors appeared to show any real ability to predictor the response variable. I will begin by include all the predictors compared against the log transformed TARGET_AMT.
+The initial predictor exploration does not bode well for the linear regression. None of the predictors appeared to show any real ability to predict the response variable. I will begin by include all the predictors compared against the log transformed TARGET_AMT. The log transformation was deemed necessary by viewing the distribution of TARGET_AMT and it's relationship to each of the predictors.
 
 ```{r, cache=TRUE}
 ln.model.1 <- lm(log(TARGET_AMT) ~ ., data=lin.training)
@@ -525,7 +521,8 @@ The summary shows that only BLUEBOOK appears to have any predictive ability. Thi
 This model was selected by using model shrinkage. [SEE APPENDIX]
 
 ```{r, cache=TRUE}
-ln.model.2 <- lm(log(TARGET_AMT) ~ BLUEBOOK + CLM_FREQ + MVR_PTS + MSTATUS.CAT + RED_CAR.CAT, data=lin.training)
+ln.model.2 <- lm(log(TARGET_AMT) ~ BLUEBOOK + CLM_FREQ + MVR_PTS + MSTATUS.CAT + 
+                   RED_CAR.CAT, data=lin.training)
 summary(ln.model.2)
 
 ```
@@ -553,7 +550,7 @@ There does not appear to be any significant difference in the predictive ability
 
 ##MODEL SELECTION
 
-All three models have performed approximately the same and thus the decision on the final model is somewhat arbitrary. I will make my decision based on the results of the testing.
+None of the three models have demonstrated a strong predictive ability and all have a small, similar $R^2$. It appears that we do not have the necessary predictors to conclusively determine the response. To help determine which model to select, I will test their predictions against the testing set.
 
 ```{r}
 pred.1 <- exp(predict(ln.model.1, newdata=lin.testing, interval='confidence'))
@@ -566,13 +563,13 @@ pred.3 <- exp(predict(ln.model.3, newdata=lin.testing, interval='confidence'))
 sum(ifelse(pred.3[, 2] < lin.testing[, 1] & pred.3[, 3] > lin.testing[, 1], 1, 0))
 ```
 
-While none of the models did a particularly strong job of predicting TARGET_AMT, the first model did by far the best. This is the model that included over a dozen useless predictors. This has me concerned about overfitting. This is especially due to the fact that an anova test determined no significant difference in the first and second models. For that reason, I have decied to select **model 5**.
+While none of the models did a particularly strong job of predicting TARGET_AMT, the first model did by far the best. This is the model that included over a dozen non-significant predictors. This has me concerned about overfitting. This is especially due to the fact that an anova test determined no significant difference in the first and second models. For that reason, I have decied to select **model 5**.
 
 #CONCLUSION
 
-As required, the predictions for the logistic regression and linear regression have been written out to csv files. However, in the end neither model turned out to be particularly powerful. The logistic regression was able to get near an 80% accurate prediction rate, however considering that a 75% prediction rate could be obtained by simply guessing that a claim would NOT be made, 80% is not as strong as it appears. In the same veign, it appears that essentially none of our predictors is usefull for identifying the cost of a claim other than the current value of the car. The $R^2$ on the linear regression was particularly poor at about 0.02. No modeling techniques were able to overcome this barrier.
+As required, the predictions for the logistic regression and linear regression have been written out to csv files. However, in the end neither model turned out to be particularly powerful. The logistic regression was able to get near an 80% accurate prediction rate, however considering that a 75% prediction rate could be obtained by simply guessing that a claim would NOT be made, 80% is not as strong as it appears. In the same veign, it appears that essentially none of our predictors is useful for identifying the cost of a claim other than the current value of the car. The $R^2$ on the linear regression was particularly poor at about 0.02. No modeling techniques were able to overcome this barrier.
 
-In a way, this exploration has only reaffirmed the need for insurance. Car collisions are somewhat rare and can happen to anyone at any time. The likely and cost of the incident can vary widely. As a result of not being able to predict accurately when such incidents will occur, we require that all drivers protect themselves with insurance.
+In a way, this exploration has only reaffirmed the need for insurance. Car collisions are somewhat rare and can happen to anyone at any time. The likelyhood and cost of the incident can vary widely. As a result of not being able to predict accurately when such incidents will occur, we require that all drivers protect themselves with insurance.
 
 ```{r cache=TRUE, message=FALSE}
 evaluation.data <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\621week4\\insurance-evaluation-data.csv') %>%
@@ -697,11 +694,23 @@ car::vif(model.2.diag)
 
 Finally, I have the mmps plots to demonstrate a good fit.
 
-```{r, message=FALSE, cache=TRUE, fig.height=4, fig.width=8, fig.align='center'}
+```{r, message=FALSE, warning=FALSE, cache=TRUE, fig.height=4, fig.width=8, fig.align='center'}
 car::marginalModelPlots(model.2.diag)
 ```
 
 ##LINEAR REGRESSION
+
+Examination of the predictors against the response variable TARGET_AMT reveal that TARGET_AMT should be log transformed.
+
+```{r, cache=TRUE, fig.height=4, fig.width=4, fig.align='center'}
+lin.training %>%
+  select_if(is.numeric) %>%
+  gather(key='Predictor', value='Value', 2:13) %>%
+  ggplot(aes(Value, log(TARGET_AMT))) +
+  geom_point() +
+  geom_smooth(method='lm') +
+  facet_wrap(~Predictor, scale='free_x')
+```
 
 Multi-collinearity is not an issue for any of the three models.
 

@@ -15,6 +15,14 @@ ggplot(lin.training, aes(PARENT1.CAT, log(TARGET_AMT))) +
   geom_point() +
   geom_smooth(method='lm')
 
+lin.training %>%
+  select_if(is.numeric) %>%
+  gather(key='Predictor', value='Value', 2:13) %>%
+  ggplot(aes(Value, log(TARGET_AMT))) +
+  geom_point() +
+  geom_smooth(method='lm') +
+  facet_wrap(~Predictor, scale='free_x')
+
 #KIDSDRIV
 #somewhat heteroscadastic
 #maybe log transform kidsdriv
